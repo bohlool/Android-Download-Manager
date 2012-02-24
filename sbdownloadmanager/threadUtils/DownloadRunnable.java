@@ -3,10 +3,7 @@
  */
 package com.sbdownloadmanager.threadUtils;
 
-import java.io.BufferedReader;
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
@@ -16,12 +13,16 @@ import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.impl.client.DefaultHttpClient;
 
 import android.graphics.BitmapFactory;
+import android.os.Handler;
+import android.os.Message;
+import android.util.Log;
 
 import com.sbdownloadmanager.DownLoadManager;
 import com.sbdownloadmanager.paramutils.ResultFormats;
 import com.sbdownloadmanager.vo.ParamsVO;
 import com.sbdownloadmanager.vo.ProgressVO;
 import com.sbdownloadmanager.vo.ResultVO;
+import com.sourcebits.hoppr.HopprActivity;
 
 /**
  * @author rajesh
@@ -29,7 +30,7 @@ import com.sbdownloadmanager.vo.ResultVO;
  */
 public class DownloadRunnable implements Runnable{
 	private ParamsVO _params;
-	private RequestObserver _listener;
+	private Handler _listener;
 	private ResultVO _result;
 	private ProgressVO _progress;
 	private HttpUriRequest _request;
@@ -70,9 +71,9 @@ public class DownloadRunnable implements Runnable{
 	/**
 	 * 
 	 */
-	public DownloadRunnable(ParamsVO params, RequestObserver listener, HttpUriRequest request) {
+	public DownloadRunnable(ParamsVO params, Handler handler, HttpUriRequest request) {
 		_params = params;
-		_listener = listener;
+		_listener = handler;
 		_request = request;
 	}
 
@@ -94,6 +95,7 @@ public class DownloadRunnable implements Runnable{
             _result.set_url(_params.get_url());
             HttpEntity entity = httpResponse.getEntity();
             if (entity != null) {
+            	
                 InputStream instream = entity.getContent();
                 
                 if(httpResponse.getHeaders("Content-Length").length > 0)
@@ -102,16 +104,18 @@ public class DownloadRunnable implements Runnable{
 	                Header header = httpResponse.getHeaders("Content-Length")[0];
 	                _progress.set_totalBytes(Float.valueOf(header.getValue()));
 	                _progress.set_url(_params.get_url());
-	                int count = 0;
-	                byte data[] = new byte[1024];
-	                
+	                /*int count = 0;
+	                byte data[] = new byte[254];
 	                long total = 0;
 	                while ((count = instream.read(data)) != -1) {
+	                	Message msg = new Message();
+	                	msg.obj = this;
 	                    total += count;
 	                    _progress.set_bytesLoaded(count);
 	                    _progress.set_progress(total * (100 / _progress.get_totalBytes()));
-	                    _listener.observe(this, DownLoadManager.PROGRESS);
-	                }
+	                    msg.what = DownLoadManager.PROGRESS;
+	                    _listener.sendMessage(msg);
+	                }*/
                 }
                 
                 if(_params.get_resultFormat() == ResultFormats.IMAGE)
@@ -121,15 +125,19 @@ public class DownloadRunnable implements Runnable{
                 {
                 	_result.set_resultString(convertStreamToString(instream));
                 }
-                
+                instream.close();
+                client.getConnectionManager().shutdown();
+                Message msg = new Message();
+            	msg.obj = this;
+                msg.what = DownLoadManager.COMPLETE;
+                _listener.sendMessage(msg);
             }
         }catch (Exception e)
         {
         	client.getConnectionManager().shutdown();
-            e.printStackTrace();
+        	System.out.print(e.getMessage());
         }
 		
-		_listener.observe(this, DownLoadManager.COMPLETE);
 	}
 	
 	/**
@@ -139,26 +147,23 @@ public class DownloadRunnable implements Runnable{
 	 * @author rajesh
 	 * @date 8 feb 2012
 	 */
-	private static String convertStreamToString(InputStream is) {
-		 
-        BufferedReader reader = new BufferedReader(new InputStreamReader(is));
-        StringBuilder sb = new StringBuilder();
- 
-        String line = null;
-        try {
-            while ((line = reader.readLine()) != null) {
-                sb.append(line + "\n");
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        } finally {
-            try {
-                is.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-        return sb.toString();
+	private static String convertStreamToString(InputStream inputStream) {
+		String result = ""; 
+		try
+		{
+			StringBuffer buffer = new StringBuffer();
+			byte[] data = new byte[256];
+	        int len = 0;
+	        while (-1 != (len = inputStream.read(data)) )
+	        {
+	            buffer.append(new String(data, 0, len));
+	        }
+	        result = buffer.toString();
+		}catch(Exception e)
+		{
+			Log.d(HopprActivity.TOSS, e.getMessage());
+		}
+		return result;
     }
 	
 	/**
