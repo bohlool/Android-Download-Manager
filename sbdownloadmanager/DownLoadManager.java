@@ -13,12 +13,13 @@ import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.protocol.HTTP;
 
 import android.graphics.Bitmap;
+import android.os.Handler;
+import android.os.Message;
 
 import com.sbdownloadmanager.paramutils.ParamsUtils;
 import com.sbdownloadmanager.paramutils.RequestMethords;
 import com.sbdownloadmanager.paramutils.ResultFormats;
 import com.sbdownloadmanager.threadUtils.DownloadRunnable;
-import com.sbdownloadmanager.threadUtils.RequestObserver;
 import com.sbdownloadmanager.vo.ParamsVO;
 import com.sbdownloadmanager.vo.ResultVO;
 
@@ -26,11 +27,11 @@ import com.sbdownloadmanager.vo.ResultVO;
  * @author rajesh
  *
  */
-public class DownLoadManager implements RequestObserver{
+public class DownLoadManager{
 	
 	
-	public static final String PROGRESS = "PROGRESS";
-	public static final String COMPLETE = "COMPLETE";
+	public static final int PROGRESS = 0;
+	public static final int COMPLETE = 1;
 	
 	private static DownLoadManager _instance;
 	
@@ -41,6 +42,61 @@ public class DownLoadManager implements RequestObserver{
 	private HashMap<String, Thread> runningThreads = new HashMap<String, Thread>();
 	
 	private HashMap<String, ArrayList<ParamsVO>> pendingRequest = new HashMap<String, ArrayList<ParamsVO>>();
+	
+	
+	/**
+	 * handle connecting child thread to main thread
+	 */
+	private Handler messageHandler = new Handler() {
+		/**
+		 * @param msg of type Message
+		 * function which will be called on load progress or load complete
+		 * @author rajesh
+		 * @date 23 feb 2012
+		 */
+		public void handleMessage(Message msg) {
+			
+			int type = msg.what;
+			DownloadRunnable runnable = (DownloadRunnable)msg.obj;
+			ParamsVO params = runnable.get_params();
+			if(type == COMPLETE)
+			{
+				ResultVO result = runnable.get_result();
+				runnable.reset();
+				cancelThread(result.get_url());
+				if(pendingRequest.get(params.get_url()) == null)
+				{
+					params.get_listener().onResult(result);
+				}else
+				{
+					ArrayList<ParamsVO> requestParamsList = pendingRequest.get(params.get_url());
+					for(ParamsVO param : requestParamsList)
+					{
+						param.get_listener().onResult(result);
+					}
+					pendingRequest.remove(params.get_url());
+				}
+				runnable = null;
+			}else
+			{
+				if(pendingRequest.get(params.get_url()) == null)
+				{
+					params.get_listener().onProgress(runnable.get_progress());
+				}else
+				{
+					ArrayList<ParamsVO> requestParamsList = pendingRequest.get(params.get_url());
+					for(ParamsVO param : requestParamsList)
+					{
+						param.get_listener().onProgress(runnable.get_progress());
+					}
+				}
+			}
+			
+			//super.handleMessage(msg);
+		}
+	};
+	
+	
 	
 	
 	/**
@@ -110,7 +166,7 @@ public class DownLoadManager implements RequestObserver{
 	{
 		try
 		{
-			Thread thread = new Thread(new DownloadRunnable(params, get_instance(), getRequest(params)));
+			Thread thread = new Thread(new DownloadRunnable(params, messageHandler, getRequest(params)));
 			runningThreads.put(params.get_url(), thread);
 			thread.start();
 		}catch(Exception e)
@@ -127,40 +183,11 @@ public class DownLoadManager implements RequestObserver{
 	 * @author rajesh
 	 * @date 7 feb 2012
 	 */
-	public void observe(DownloadRunnable runnable, String type) {
-		ParamsVO params = runnable.get_params();
-		if(type == COMPLETE)
-		{
-			ResultVO result = runnable.get_result();
-			if(pendingRequest.get(params.get_url()) == null)
-			{
-				runnable.get_params().get_listener().onResult(result);
-			}else
-			{
-				ArrayList<ParamsVO> requestParamsList = pendingRequest.get(params.get_url());
-				for(ParamsVO param : requestParamsList)
-				{
-					param.get_listener().onResult(result);
-				}
-				pendingRequest.remove(params.get_url());
-			}
-			runnable.reset();
-			cancelThread(result.get_url());
-			runnable = null;
-		}else
-		{
-			if(pendingRequest.get(params.get_url()) == null)
-			{
-				params.get_listener().onProgress(runnable.get_progress());
-			}else
-			{
-				ArrayList<ParamsVO> requestParamsList = pendingRequest.get(params.get_url());
-				for(ParamsVO param : requestParamsList)
-				{
-					param.get_listener().onProgress(runnable.get_progress());
-				}
-			}
-		}
+	public void observe(DownloadRunnable runnable, int type) {
+		Message msg = new Message();
+		msg.what = type;
+		msg.obj = runnable;
+		messageHandler.sendMessage(msg);
 	}
 	
 	/**
